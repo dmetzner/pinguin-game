@@ -10,13 +10,13 @@
 > **Is it playable?** Partly. Some of it is genuinely fun. Some of it is not.
 >
 > **Is it full of bugs?** **Yes.** Expect broken physics, wrong camera angles, modes that
-> misbehave, and things that look finished in the source and are not on screen. The end-to-end
-> suite is red on `main` right now and is being published that way on purpose — see
-> [Status](#status).
+> misbehave, and things that look finished in the source and are not on screen. `CLAUDE.md` lists
+> eighteen traps that shipped and had to be found by a person playing it on a phone — a green test
+> suite never caught one of them, and that is the most honest thing this repository has to say.
 >
 > Do not treat this as a reference for how to build a game, and do not treat the confident tone of
 > the documentation below as a claim of quality — that tone is itself part of what the experiment
-> produced. `CLAUDE.md` lists eighteen traps that shipped and had to be found by playing it.
+> produced.
 >
 > Read it as a specimen. MIT licensed, so do what you like with it.
 
