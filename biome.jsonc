@@ -1,0 +1,88 @@
+// `.jsonc`, not `.json`, so a rule turned off can carry the reason it was turned off. Biome rejects
+// unknown keys outright, so the `"//key": "…"` convention `package.json` uses is unavailable here,
+// and a rule disabled without a reason is exactly what this file has to avoid.
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+	"vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+	"files": {
+		// `**/*.svelte` is LINTED here and FORMATTED by Prettier — see the override below.
+		"includes": [
+			"**/*.js",
+			"**/*.mjs",
+			"**/*.ts",
+			"**/*.json",
+			"**/*.jsonc",
+			"**/*.svelte",
+			"!**/.svelte-kit",
+			"!**/build",
+			"!**/node_modules"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab",
+		"lineWidth": 100
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single",
+			"trailingCommas": "none"
+		}
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"preset": "recommended",
+			"style": {
+				// The simulation is written as mathematics and reads as mathematics: `let vx = …`
+				// reassigned across the steering, gravity and drag stages is the clearest form that
+				// sequence takes. `useConst` would demand a new binding per stage and turn eight
+				// legible lines into fourteen.
+				"useConst": "off"
+			},
+			"suspicious": {
+				// `console` is how a WebGL failure surfaces at all on a phone that has no devtools
+				// attached. Errors and warnings stay; a stray `console.log` does not.
+				"noConsole": { "level": "error", "options": { "allow": ["warn", "error"] } }
+			}
+		}
+	},
+	"overrides": [
+		{
+			// Prettier owns Svelte formatting (`prettier-plugin-svelte` understands the template
+			// grammar; Biome's formatter does not yet). Biome still LINTS the `<script>` blocks,
+			// which is where the logic lives.
+			"includes": ["**/*.svelte"],
+			"formatter": { "enabled": false },
+			"assist": {
+				// Same reason: organising imports rewrites the script block Prettier owns.
+				"actions": { "source": { "organizeImports": "off" } }
+			},
+			"linter": {
+				"rules": {
+					"correctness": {
+						// Biome lints the `<script>` block ALONE and never parses the markup, so every
+						// `$props()` member and every import used only in the template reads as dead.
+						// All 15 diagnostics from enabling `.svelte` here were this — `move` is bound
+						// on line 62 of `Joystick.svelte` and Biome still called it unused — and none
+						// was real. The sibling repos hit the identical wall at a larger scale.
+						"noUnusedVariables": "off",
+						"noUnusedImports": "off"
+					}
+				}
+			}
+		},
+		{
+			// The shader source in `scene.ts` is GLSL inside a template literal. Biome sees a very
+			// long string and nothing else, and there is no sensible way to wrap it at 100 columns.
+			"includes": ["**/render/scene.ts"],
+			"formatter": { "lineWidth": 120 }
+		},
+		{
+			// Console output IS the interface in a test or an e2e helper — it is how a failure
+			// explains itself when nobody has devtools attached.
+			"includes": ["e2e/**", "**/*.test.ts"],
+			"linter": { "rules": { "suspicious": { "noConsole": "off" } } }
+		}
+	]
+}

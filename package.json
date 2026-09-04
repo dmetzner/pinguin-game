@@ -1,0 +1,51 @@
+{
+	"name": "pinguin-game",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"//engines": "A FLOOR AND A CEILING, both inherited from the sibling repos rather than re-derived. Floor: Vite 8 / Vitest 4 need Node 20.19+ or 22.12+. Ceiling: from Node 25 onward Node defines its own `localStorage` global, Vitest therefore never installs happy-dom's, and any test touching it dies pointing at the setup file instead of at Node. This repo's unit tests are pure and run in the `node` environment, so the ceiling does not bite here YET — it is declared anyway, because the first test that needs a DOM would otherwise discover it the hard way. `.nvmrc` pins 24, which is what CI and any deploy build on.",
+	"engines": {
+		"node": ">=22.12 <25"
+	},
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p tsconfig.e2e.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"format": "prettier --write \"**/*.{svelte,css,html}\" && biome format --write .",
+		"lint": "biome check . && prettier --check \"**/*.{svelte,css,html}\"",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"test:e2e": "playwright test",
+		"shots": "playwright test e2e/shots.spec.ts --project=phone-landscape",
+		"test:e2e:ui": "playwright test --ui"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.7",
+		"@playwright/test": "1.62.1",
+		"@sveltejs/adapter-static": "3.0.10",
+		"@sveltejs/kit": "2.70.2",
+		"@sveltejs/vite-plugin-svelte": "7.2.0",
+		"@tailwindcss/vite": "4.3.3",
+		"@types/node": "26.1.2",
+		"@types/three": "0.185.4",
+		"prettier": "3.9.6",
+		"prettier-plugin-svelte": "4.1.1",
+		"prettier-plugin-tailwindcss": "0.8.1",
+		"svelte": "5.56.8",
+		"svelte-check": "4.7.5",
+		"tailwindcss": "4.3.3",
+		"typescript": "6.0.3",
+		"vite": "8.2.1",
+		"vitest": "4.1.10"
+	},
+	"dependencies": {
+		"three": "0.185.1"
+	},
+	"//overrides": "Transitive, BUILD-TIME-ONLY advisory, and VERIFIED still necessary here rather than copied across: with the override removed, npm resolves cookie@0.6.0 under @sveltejs/kit 2.70.2 and npm audit reports 3 low advisories. None of it reaches this app — SvelteKit pulls cookie for server-side helpers that adapter-static plus ssr=false never run. npm audit fix cannot resolve it without downgrading SvelteKit, so the version is pinned by hand and checked the way that matters: lint, typecheck, the unit suite and a production build all green afterwards. Revisit when SvelteKit bumps its own dependency.",
+	"overrides": {
+		"cookie": "^0.7.2"
+	}
+}

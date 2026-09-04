@@ -1,0 +1,8 @@
+.DS_Store
+node_modules
+/build
+/.svelte-kit
+/dist
+/test-results
+/playwright-report
+package-lock.json

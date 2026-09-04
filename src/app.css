@@ -1,0 +1,1070 @@
+@import 'tailwindcss';
+
+/**
+ * The display face, self-hosted.
+ *
+ * `system-ui` was the loudest "this is a website" signal on the screen — a bright cartoon polar sea
+ * with a browser's UI font laid over it (`backlog/stories/09-the-look.md` §4). Baloo 2 is a rounded
+ * heavy face: generous bevels, no thin strokes, big counters, which is the same shape language the
+ * penguins are drawn in.
+ *
+ * SELF-HOSTED rather than linked, and that is a hard requirement rather than a preference: the CSP
+ * in `svelte.config.js` lists `font-src 'self'` and nothing remote, and this is an offline PWA whose
+ * whole promise is that solo play needs no network. A Google-hosted stylesheet would be a font that
+ * silently disappears on a school wifi that drops — and living in `static/` means the service worker
+ * precaches it with everything else in `files`, so the second launch has it before the first frame.
+ *
+ * ONE file, 33 056 bytes, and it is a VARIABLE font whose `wght` axis runs 400–800. Two static
+ * weights (700 + 800) cost 38 060 bytes in two requests, so the variable file is smaller AND covers
+ * more. The subset is Google's `latin` slice, which is `U+0000–00FF` plus punctuation — every glyph
+ * German needs (ä ö ü ß Ä Ö Ü) and the `·` the mode lines are built from.
+ *
+ * The `unicode-range` is copied from the subset the file actually IS, and it is load-bearing rather
+ * than decoration: the interface also draws ▼ (U+25BC), ✓ (U+2713), the fullscreen arrows and four
+ * emoji, and NONE of them are in this file. Declaring the range hands those glyphs to the fallback
+ * family cleanly instead of asking a rounded display face for a trophy.
+ *
+ * `swap`, not `block`: the countdown is on screen at t=0 and three seconds of invisible numerals is
+ * worse than three frames of the fallback.
+ *
+ * Root-relative `url()`, which is what every other asset reference in this project does (see the
+ * icon list in `routes/manifest.webmanifest`). It is correct for the only deploy there is — the site
+ * is served from the root of a domain and `.github/workflows/deploy.yml` sets no `BASE_PATH`. A
+ * subpath build would have to move this file under `src/lib/` so Vite rewrites the URL.
+ *
+ * The licence text sits beside the font in `static/fonts/OFL.txt`. That is a condition of the SIL
+ * Open Font License, not a courtesy.
+ */
+@font-face {
+	font-family: 'Baloo 2';
+	font-style: normal;
+	font-weight: 400 800;
+	font-display: swap;
+	src: url('/fonts/baloo2-latin-700-800.woff2') format('woff2');
+	unicode-range:
+		U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329,
+		U+1D00-1DBF, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/**
+ * Design tokens.
+ *
+ * Small on purpose in phase 0: the game IS the screen, and the only interface is a joystick, three
+ * buttons and a readout. What changed in phase 5 is not the size of the list but what it is FOR —
+ * the palette used to be the game's own pale blues so the HUD looked like part of the world, and the
+ * result was an interface that looked like part of a website instead. It is now a set of painted
+ * plaques and chunky buttons sitting ON the world, which is what both reference games do.
+ *
+ * No dark mode, and that is a decision rather than an omission: the scene is a bright polar day and
+ * a dark HUD over it would be less legible, not more. See `docs/DESIGN.md` §6.
+ */
+:root {
+	/* The renderer's own three. The scene reads these values too — leave them alone unless the sky
+	   is being repainted, and then change them together. */
+	--sky: #8ed4f2;
+	--ice: #f4fbff;
+	--deep: #0d3a5c;
+
+	--deep-soft: #1b5478;
+	--accent: #f7a83c;
+	--danger: #c5392b;
+
+	/**
+	 * The plaque, and it is the biggest single change on the screen.
+	 *
+	 * It used to be a translucent dark rectangle, which read as a cookie banner over a game — the
+	 * word "Noch 4 auf dem Eis" in a browser font in a grey-blue box. A painted cream plaque with a
+	 * warm rim and a shadow under it is what Animal Crossing puts a label in, and the ink on it is
+	 * navy at 11:1 rather than white at 4.5:1, which is more headroom than the old panel ever had.
+	 *
+	 * Still slightly translucent so the blur behind it means something and the sea shows through at
+	 * the edges. At 0.95 the ink stays above 10:1 over the darkest water in the game.
+	 */
+	--panel: rgb(255 250 240 / 0.95);
+	--panel-edge: #f3ddb8;
+	--panel-lip: #d8b382;
+	--on-panel: #123b58;
+	--on-panel-dim: #38607d;
+
+	/**
+	 * Ink for the two words that are about YOU rather than about the round.
+	 *
+	 * `--accent` is a warm the renderer uses and it is 1.9:1 on the plaque — fine as a fill, useless
+	 * as text. This is the same hue taken down to 4.7:1 so "Platsch!" is a word a child can read
+	 * rather than a colour they can see.
+	 */
+	--accent-ink: #a1620a;
+
+	/**
+	 * The gold of the "that one is you" arrow, and it is `MARKER_COLOUR` in `render/penguin.ts`.
+	 *
+	 * The ▼ on the countdown and the cone bobbing over the penguin's head are one marker in two
+	 * places, and the line only does its job if both ends look alike — so this value has to agree
+	 * with that constant. It is 1.4:1 on a cream plaque, which is why `.you-arrow` strokes it.
+	 */
+	--marker: #ffd21e;
+
+	/**
+	 * The chunky button.
+	 *
+	 * Each variant sets a fill, the darker shade of it that makes the bottom LIP, and the ink. The
+	 * lip is the whole trick: a solid offset edge under the button, which the press state travels
+	 * down into. That is what "pressable" looks like in both reference games, and it is why these
+	 * are one hard shadow plus one soft one rather than a blur.
+	 *
+	 * Every fill is measured against its ink: white on the four dark fills is 4.7–5.0:1, navy on the
+	 * yellow is 8.0:1. All above 4.5 at any size, because the labels on the top row are 16 px bold —
+	 * under WCAG's large-text threshold, so the small-text bar is the one that applies.
+	 */
+	--btn: #1f74b5;
+	--btn-lip: #165382;
+	--btn-ink: #ffffff;
+	--btn-shade: rgb(13 58 92 / 0.4);
+}
+
+/**
+ * The one font stack, and every string in this game goes through it.
+ *
+ * There is no body copy here to speak of — the longest sentence on screen is fourteen words of
+ * instructions — so there is no reason to keep a second, quieter face for it. `--font-display` is
+ * the name because that is what the countdown, the verdict, the buttons, the HUD and the name tags
+ * all ask for, and they are the whole interface.
+ *
+ * `Trebuchet MS` ahead of `system-ui` in the fallback: if the file has not landed yet, the swap is
+ * from something humanist and roundish rather than from Helvetica.
+ */
+:root {
+	--font-display: 'Baloo 2', 'Trebuchet MS', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+	overscroll-behavior: none;
+	background: var(--sky);
+	color: var(--deep);
+	font-family: var(--font-display);
+	/* The face carries no weight under 400 and the interface wants none: 700 is its resting weight
+	   here, so a Tailwind `text-sm` with no weight class still reads as a game label rather than as
+	   a caption. Anything asking for less is clamped to 400 by the variation axis, which is the
+	   lightest this file goes. */
+	font-weight: 700;
+}
+
+body {
+	/* The whole viewport is a control surface. A pull-to-refresh or a rubber-band scroll in the
+	   middle of a round is never what was meant, and on iOS the only reliable way to stop the
+	   latter is to make the document itself unscrollable. */
+	position: fixed;
+	inset: 0;
+	overflow: hidden;
+	touch-action: none;
+	-webkit-user-select: none;
+	user-select: none;
+	-webkit-tap-highlight-color: transparent;
+}
+
+/* Safe areas: the controls live in the bottom corners, which on a modern phone is where the home
+   indicator and the display's rounded corners are. */
+.safe-b {
+	padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+.safe-l {
+	padding-left: max(1rem, env(safe-area-inset-left));
+}
+.safe-r {
+	padding-right: max(1rem, env(safe-area-inset-right));
+}
+.safe-t {
+	padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+
+/**
+ * Every button in the game.
+ *
+ * It was a flat grey glass disc with a hairline ring — competent, neutral, and the thing least like
+ * a game on the screen. What makes a button in Animal Crossing or Mario look pressable is not a
+ * gradient, it is THICKNESS: a saturated fill, a fat light rim, and a solid darker edge underneath
+ * that the button sinks into when you press it. All three are here and none of them cost a repaint
+ * of anything else.
+ *
+ * SIZE IS UNCHANGED, deliberately. The three thumb buttons are 96 px and 80 px, well above the
+ * 44 px minimum, because the audience is eight and the surface is glass in motion. Restyling may not
+ * move a hit box; that is how trap 4 gets paid a fifth time — so the rim is `border-box` and the two
+ * shadows are shadows, none of which is a layout property.
+ *
+ * The arithmetic that has to keep holding, on 568×320 (the narrowest screen this game supports).
+ * The joystick's zone is `inset-y-0 left-0 w-1/2`, i.e. x∈[0,284], and it comes late in the DOM:
+ *
+ *   - The triangle sits in an 11 rem box at the bottom-right safe area, x∈[376,552]. Its LEFTMOST
+ *     edge is the dash at x=376, ninety-two pixels clear of the stick in landscape — but the
+ *     clearance is NOT why it needs no `z-index`, and that distinction cost a night. It needs none
+ *     because it is rendered after `<Joystick>` and paint order among `z-index: auto` siblings is
+ *     document order. In portrait the same box overlaps the stick's zone by 32 px and is still fine,
+ *     for the same reason. `src/stacking.test.ts` is what keeps that true; a coincidence of geometry
+ *     was never what was keeping it true.
+ *   - The top-right row reaches back to x≈172 — a hundred pixels INSIDE the stick's zone — and is
+ *     pressable only because of its `z-10`. That is trap 12, and the row got 8 px narrower with this
+ *     face rather than wider, so the fix still covers it.
+ *   - The readout is capped so it stops short of that row; see `.hud`.
+ *   - The result panel is shortened so it stops short of the mute button; see `.result-panel`.
+ *
+ * `touch-action: manipulation` suppresses the 300 ms double-tap-zoom delay that would otherwise sit
+ * between a tap and a snowball.
+ */
+.action {
+	pointer-events: auto;
+	/**
+	 * NO `position` HERE, and that is a scar rather than an omission.
+	 *
+	 * This rule carried `position: relative` for one day and it needed it for nothing — no
+	 * pseudo-element, no absolutely positioned child, nothing. What it did instead was disable every
+	 * Tailwind positioning utility written on a button anywhere in the app: `.absolute` lives in
+	 * `@layer utilities`, this file is UNLAYERED, and an unlayered declaration beats a layered one
+	 * whatever the order in the source. So `class="action absolute right-0 bottom-0"` laid out in
+	 * normal FLOW. In the arena modes the three buttons happened to be the same width as their box
+	 * and stacked into something that still looked like a column of controls; on the island a 176 px
+	 * door bar joined them, the line wrapped, and "Zack!" went clean off the bottom of a 568×320
+	 * screen — visible in `shots/small-landscape-island.png`, unreachable, trap 4's family for the
+	 * fifth time and the first one no arithmetic could have caught. The numbers said the bar fitted
+	 * an empty slot and they were right; the layout they described was not the one running.
+	 *
+	 * Two rules follow, and they are the reason this comment is this long.
+	 *
+	 *   1. **The rule is not "never win against a utility". It is "win on purpose, and say so."**
+	 *
+	 *      An unlayered file beating a layered utility is legal, useful, and this one does it five
+	 *      times deliberately: the readout's padding, the top row's padding, the result button's
+	 *      height, the customise sheet's `flex-direction`, and the portrait stick zone. Every one of
+	 *      those is a guard, and the last one is the only thing keeping the dash button out from
+	 *      under the joystick on a tall screen — so a blanket ban would have deleted five fixes, and
+	 *      moving this file into `@layer components` would delete the same five silently, since
+	 *      Tailwind declares `components` BEFORE `utilities` and later layers win. That was tried on
+	 *      paper and rejected; `src/cascade.test.ts` records the whole argument.
+	 *
+	 *      What is forbidden is winning by ACCIDENT — a layout property set here because it looked
+	 *      harmless, on a class the markup also positions. `position` on `.action` was exactly that,
+	 *      and the difference between the two cases is not the property, it is whether anybody wrote
+	 *      down that they meant it. So that is now mechanical rather than a matter of care: the guard
+	 *      fails on any unlayered rule in this file declaring a property whose failure is INVISIBLE
+	 *      — `position`, insets, `display`, `float`, `clear`, `z-index`, `order`, `flex-direction`,
+	 *      `flex-wrap` — unless its selector carries a written reason. Sizes and padding are left
+	 *      alone on purpose: a dead `width` shows up the moment anybody looks, and a guard that
+	 *      flags forty harmless rules is a guard somebody deletes.
+	 *
+	 *   2. `.sideline-ball` used to be the exception that positioned itself off this rule. It is not
+	 *      an exception any more: its slot is sized in the markup and the class carries only colour
+	 *      and type. There is now no class in this file that positions an `.action`.
+	 */
+	border-radius: 9999px;
+	/* Inside the box, because Tailwind sets `border-box` globally — so a fatter rim eats padding
+	   rather than growing the hit box. That is the property that makes this restyle safe. */
+	border: 4px solid rgb(255 255 255 / 0.92);
+	background: var(--btn);
+	color: var(--btn-ink);
+	font-family: var(--font-display);
+	font-weight: 800;
+	line-height: 1.05;
+	/* The label is the carrier and the fill is decoration — every button says what it does in words,
+	   so a child who cannot tell the green one from the blue one has lost nothing. */
+	text-shadow: 0 2px 0 var(--btn-shade);
+	/* Two shadows doing two jobs: the hard one is the button's own edge, the soft one is the gap
+	   between the button and the ice. Neither affects layout or hit-testing. */
+	box-shadow:
+		0 6px 0 var(--btn-lip),
+		0 11px 16px rgb(13 58 92 / 0.3),
+		inset 0 3px 0 rgb(255 255 255 / 0.25);
+	touch-action: manipulation;
+	transition:
+		transform 90ms ease-out,
+		box-shadow 90ms ease-out;
+}
+
+/**
+ * The press, and it is the whole reason the lip exists.
+ *
+ * The button travels down by exactly the height its edge loses, so the top face lands where the
+ * bottom of the lip was and nothing appears to move sideways. A scale, which is what this used to
+ * do, reads as a picture shrinking; this reads as a key going down.
+ */
+.action:active {
+	transform: translateY(4px);
+	box-shadow:
+		0 2px 0 var(--btn-lip),
+		0 4px 7px rgb(13 58 92 / 0.28),
+		inset 0 3px 0 rgb(255 255 255 / 0.2);
+}
+
+/**
+ * Keyboard focus, which a restyle this heavy would otherwise paint over.
+ *
+ * TWO rings, and for the same reason the countdown numeral is stroked rather than shadowed: a
+ * button can be standing on bright ice or on dark water, and neither a white ring nor a dark one
+ * survives both. White against the fill, navy against whatever is behind it.
+ */
+.action:focus-visible {
+	outline: 3px solid #fff;
+	outline-offset: 2px;
+	box-shadow:
+		0 6px 0 var(--btn-lip),
+		0 0 0 6px rgb(13 58 92 / 0.85),
+		0 11px 16px rgb(13 58 92 / 0.3);
+}
+
+/**
+ * A button whose label is a single glyph rather than a word.
+ *
+ * The mute and fullscreen controls say what they do with 🔊 and ⤢, and 🔊 is a COLOUR emoji: the
+ * label shadow every other button wears paints a dark silhouette 2 px under it, which reads as a
+ * printing error rather than as depth. Words get the shadow, pictures do not.
+ *
+ * The die 🎲 in `Customise.svelte` is the third of these and carries the class for the same reason.
+ */
+.action-glyph {
+	text-shadow: none;
+}
+
+/**
+ * The three thumb buttons, one colour each.
+ *
+ * Not decoration: three same-coloured discs in a triangle are three targets a child has to read
+ * before pressing, and the whole point of the triangle is that a thumb finds them without looking.
+ * The word stays on every one of them, so nothing here is carried by colour alone.
+ *
+ * Jump is the yellow one because it is the button pressed most often and the only one that exists in
+ * all four modes — and yellow is the one hue in this palette that white ink cannot sit on, so it
+ * takes navy at 8:1 instead and gets a light shade under the label rather than a dark one.
+ */
+.action-jump {
+	--btn: #ffcf4d;
+	--btn-lip: #d99f22;
+	--btn-ink: var(--deep);
+	--btn-shade: rgb(255 255 255 / 0.5);
+}
+.action-ball {
+	--btn: #127f92;
+	--btn-lip: #0c5b69;
+}
+.action-dash {
+	--btn: #c9451f;
+	--btn-lip: #903116;
+}
+
+/**
+ * The one button a screen exists for: "Los geht's!", "Nochmal", "Zurück".
+ *
+ * Green because it is the only unambiguous "yes" in a palette otherwise made of sea, and because a
+ * result screen should have exactly one thing on it that looks like the way out.
+ */
+.cta {
+	--btn: #188039;
+	--btn-lip: #115c29;
+}
+
+/**
+ * The countdown numeral.
+ *
+ * Enormous, because it has to be readable in peripheral vision while a player is still working out
+ * where their penguin is. Outlined rather than shadowed: the background is bright ice AND dark sea
+ * depending on where it lands, and only a contrasting stroke survives both. This is the one place
+ * in the interface with no plaque behind it, which is why the recipe is a stroke rather than ink on
+ * a fill — and it is the recipe `.you-arrow` borrows for the same reason.
+ */
+.countdown-number {
+	font-family: var(--font-display);
+	font-size: clamp(5rem, 22vh, 11rem);
+	font-weight: 800;
+	line-height: 1;
+	color: #fff;
+	-webkit-text-stroke: 6px rgb(13 58 92 / 0.85);
+	paint-order: stroke fill;
+}
+
+/**
+ * The "that one is you" arrow on the countdown.
+ *
+ * Gold, because the cone bobbing over the penguin's head is gold — one marker in two places, and
+ * `--marker` says where the number comes from. Gold on cream is 1.4:1, so it is stroked rather than
+ * darkened: darkening it would make it legible and stop it matching the thing it points at, which
+ * is the only job it has. The NAME beside it is what carries the information; this is the picture.
+ */
+.you-arrow {
+	color: var(--marker);
+	-webkit-text-stroke: 1.5px var(--deep);
+	paint-order: stroke fill;
+}
+
+/**
+ * The live penguin in "Mein Pinguin".
+ *
+ * Sized in the stylesheet and never by the renderer: `render/preview.ts` calls `setSize(…, false)`
+ * so three writes the drawing buffer and leaves the CSS box alone. A renderer that set both would
+ * fight this rule every time the sheet resized.
+ *
+ * ONE number decides both this box and the column it sits in (`--preview-size`), because they were
+ * two numbers once and the box was the bigger of them: an 11 rem penguin in a 10 rem column
+ * overflowed by a rem, ate the gap between the columns, and left the swatches sitting against the
+ * picture (Daniel, 2026-08-17). Square, and capped against the VIEWPORT because the shortest screen
+ * this game supports is 320 px tall in landscape.
+ *
+ * The variable was called `--portrait` until phase 5, which cost five minutes of "what has the
+ * turntable got to do with holding the phone upright" every time somebody read this file — and
+ * `backlog/stories/11-portrait.md`, which adds real portrait support, would have made that permanent.
+ */
+:root {
+	--preview-size: min(11rem, 38vh);
+}
+
+.penguin-preview {
+	width: var(--preview-size);
+	height: var(--preview-size);
+	margin: 0 auto;
+	border-radius: 0.9rem;
+	overflow: hidden;
+	background: rgb(159 216 239 / 0.5);
+	/* A sunk frame rather than a raised one: everything else in the sheet stands up off the plaque,
+	   so the one hole cut into it should read as a hole. */
+	border: 3px solid var(--panel-lip);
+	box-shadow: inset 0 3px 8px rgb(13 58 92 / 0.22);
+}
+
+/**
+ * The customise sheet's two columns.
+ *
+ * Landscape rather than a width breakpoint, because the game IS landscape and the narrowest screen
+ * it supports is 568 px wide — under Tailwind's `sm`, so a `sm:flex-row` left exactly the smallest
+ * phone stacked, with the hats below the fold and a picker nobody could reach without scrolling the
+ * penguin off the top.
+ */
+@media (orientation: landscape) {
+	.customise-body {
+		flex-direction: row;
+	}
+	.customise-aside {
+		width: var(--preview-size);
+	}
+}
+
+/**
+ * Colour swatches and hat chips.
+ *
+ * 44 px minimum, and the chosen one carries a ring AND a tick — no information in this game is ever
+ * carried by colour alone, and a colour picker is the last place to make an exception.
+ *
+ * A swatch keeps its white tick and dark text-shadow: it sits on an arbitrary player colour, not on
+ * the plaque, so the plaque going from navy to cream changes nothing about it. The CHIP does sit on
+ * the plaque, and its old white-on-white-14% would have been invisible there — that is the one
+ * thing the plaque flip broke, and it is fixed here rather than discovered on a phone.
+ */
+.swatch {
+	width: 2.75rem;
+	height: 2.75rem;
+	border-radius: 0.7rem;
+	border: 3px solid rgb(255 255 255 / 0.75);
+	color: #fff;
+	font-weight: 800;
+	text-shadow: 0 1px 3px rgb(0 0 0 / 0.6);
+	box-shadow: 0 3px 0 rgb(13 58 92 / 0.22);
+	touch-action: manipulation;
+}
+.swatch-on {
+	outline: 3px solid var(--on-panel);
+	outline-offset: 2px;
+}
+
+.chip {
+	min-width: 4.5rem;
+	height: 2.75rem;
+	padding: 0 0.9rem;
+	border-radius: 9999px;
+	border: 3px solid var(--panel-lip);
+	background: rgb(255 255 255 / 0.7);
+	color: var(--on-panel);
+	font-weight: 800;
+	touch-action: manipulation;
+}
+.chip-on {
+	background: var(--deep-soft);
+	color: #fff;
+	border-color: rgb(255 255 255 / 0.85);
+	outline: 3px solid var(--on-panel);
+	outline-offset: 2px;
+}
+
+/**
+ * A rung of something being built, once it is built.
+ *
+ * `Igloo.svelte` was using `.chip-on` for this and said so in a comment rather than shipping it
+ * quietly, which is why this class exists tonight. The look is right — filled navy reads as done —
+ * but `.chip-on` means CHOSEN, and it carries the outline ring that says "this is the one you
+ * picked". A progress rung is not a selection: there is nothing to pick, every rung below the
+ * current one is filled, and the ring would be claiming a state that does not exist. One class doing
+ * duty for two states is what reads as a bug to whoever adds the third.
+ *
+ * So: the fill and the light rim, and no ring. The ✓ the sheet already draws is what carries the
+ * information — nothing in this game is ever carried by colour alone, least of all a progress bar
+ * where the difference between two states IS the fill.
+ */
+.chip-done {
+	background: var(--deep-soft);
+	color: #fff;
+	border-color: rgb(255 255 255 / 0.85);
+}
+
+/**
+ * The mode switch, which has two lines to say in the space of one button.
+ *
+ * The name of the game it switches TO, and under it the number of penguins that game has — which is
+ * the difference a child actually notices, and the reason the button is worth two lines. Tabular
+ * digits so 4 and 30 do not shift the label under them.
+ *
+ * It is next to `.action` for reading, and NOT for the cascade — the file used to claim the ordering
+ * was load-bearing ("both are one class, so the later `display` is the one that applies"). That is
+ * true of two unlayered rules and it is exactly the sentence that let trap 18 survive a review: it
+ * reads as though the cascade had been settled here, when in fact `.action` declares no `display` at
+ * all, and source order settles nothing against a LAYERED utility however it is written. Every rule
+ * in this file that wins a fight now says which KIND of fight it is winning, and `src/cascade.test.ts`
+ * holds the list.
+ */
+.mode-switch {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	line-height: 1.05;
+	gap: 0.1rem;
+}
+/**
+ * The door bars specifically — "Los!" and "Bauen" — not the top-row mode cycler, which also carries
+ * `.mode-switch` but never `.cta`. One declaration rather than the same inline `style="opacity: 0.88"`
+ * pasted onto two buttons in `Game.svelte`: a door bar is exactly `.mode-switch.cta`, so the combined
+ * selector is precise without a third class, and the next one Daniel adds gets this for free.
+ */
+.mode-switch.cta {
+	opacity: 0.88;
+}
+.mode-switch-name {
+	font-size: 1rem;
+	font-weight: 800;
+}
+.mode-switch-count {
+	font-size: 0.7rem;
+	font-weight: 700;
+	opacity: 0.85;
+	font-variant-numeric: tabular-nums;
+}
+
+/**
+ * The "Ball" button once its owner is in the water.
+ *
+ * The one control a spectator keeps, so it says so: lit and bigger-lettered, because the whole risk
+ * of the sidelines is a child who does not realise the button still does anything. The stun it
+ * delivers is a third of a real snowball's — that difference is felt on the receiving end, not
+ * announced here.
+ *
+ * COLOUR AND TYPE ONLY. It carried `inset: auto 0 0 auto; width: 6rem; height: 6rem` for a day and
+ * both halves were wrong in the same way: the inset was zero offsets on a `position: relative` it
+ * borrowed from `.action`, so the ball grew teal in the wrong corner; and the size hard-wired a box
+ * that the markup was already sizing. `Game.svelte` now swaps the slot itself when its owner goes in
+ * the water — 80 px in the corner becomes 96 px where "Hüpf" was, since "Hüpf" is unmounted by then
+ * — which is the right place for it, and leaves this class nothing to say about geometry.
+ *
+ * That is rule 1 in the comment on `.action`, applied to the one class that used to be its exception.
+ * The `font-size` stays, and it is a deliberate override of the button's own `text-base`: this is the
+ * only control on the screen and it is allowed to shout.
+ */
+.sideline-ball {
+	font-size: 1.125rem;
+	--btn: #16a0b8;
+	--btn-lip: #0c6c7d;
+}
+
+/**
+ * A full-screen layer with something centred in it.
+ *
+ * The `pointer-events` pair is the whole reason this is a class rather than seven copies of the
+ * same utilities. A backdrop that covers the screen and TAKES TAPS makes every control behind it
+ * dead while looking pressable — which is trap 4 in `CLAUDE.md`, and the result panel paid it a
+ * second time by hiding the button row in the top corner. The layer passes taps through and its
+ * children take them, exactly the way `.action` already carries its own `pointer-events: auto` so
+ * a call site never has to remember.
+ *
+ * A layer that is MEANT to block — the customisation sheet, the rotate card — sets
+ * `pointer-events: auto` back on itself and says why.
+ */
+.overlay {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	pointer-events: none;
+}
+.overlay > * {
+	pointer-events: auto;
+}
+
+/**
+ * The plaque, in two sizes.
+ *
+ * `.panel` is the painted board things are written on — the readout, the start screen, the result,
+ * the customise sheet. Cream fill, a warm rim, a solid lip and a real shadow under it, because that
+ * is what separates a label from a bright white floe: the old translucent dark rectangle separated
+ * itself by being dark, which is also exactly what made it look like a consent dialog.
+ *
+ * `.pill` is the same board for a single line of text — the rules line, the instructions, "Du bist
+ * Flitzer Nala". No lip: at 12 px a 4 px edge under the text is a slab, and these three sit UNDER
+ * other things (the hint line lives beneath the result panel) where a shadow reads as a mistake.
+ */
+.panel {
+	background: var(--panel);
+	color: var(--on-panel);
+	border: 3px solid var(--panel-edge);
+	border-radius: 1.1rem;
+	box-shadow:
+		0 4px 0 var(--panel-lip),
+		0 12px 22px rgb(13 58 92 / 0.28);
+	backdrop-filter: blur(4px);
+}
+
+.pill {
+	background: var(--panel);
+	color: var(--on-panel);
+	border: 2px solid var(--panel-edge);
+	border-radius: 9999px;
+	box-shadow: 0 4px 10px rgb(13 58 92 / 0.22);
+	backdrop-filter: blur(4px);
+}
+
+/**
+ * The two buttons on the result screen.
+ *
+ * `flex-wrap`, unconditionally, and it is the same argument as the top-right row: the plaque is a
+ * grid item with `place-items: center`, so it is sized `fit-content` — capped by the space the
+ * overlay gives it. On a 320 px portrait screen that cap is 272 px and the row wants 299.5 px
+ * ("Nochmal" at `w-48`, plus "Zur Insel", plus the gap), so with `nowrap` the buttons spilled
+ * outside the plaque they belong to. Wrapping puts the second one on its own line and the whole
+ * thing back inside its own edges.
+ *
+ * Latent until tonight, because arena modes still meet the rotate card in portrait — and worth
+ * fixing before rather than after somebody gives the slide or the chase `portrait: true`, which is
+ * the one change that makes this screen visible on a tall phone.
+ *
+ * Not conditional on the viewport for the reason the row is not: a guard armed only where the bug
+ * has already been seen is a guard that is not armed when the copy grows. It costs nothing on every
+ * screen where the row fits, which is every landscape one.
+ */
+.result-actions {
+	flex-wrap: wrap;
+}
+
+/**
+ * The readout, top left.
+ *
+ * "Noch 4 auf dem Eis" with the number bigger than the words, because the number is the only score
+ * this game has and the sentence around it is there once, for the first round a child ever plays.
+ *
+ * The WIDTH is the thing to be careful about, and not because of taps: this plaque is inside a
+ * `pointer-events-none` wrapper, so the joystick underneath still gets every touch on it. It is the
+ * top-RIGHT button row that it can run into. On a 568 px screen that row starts at about x=175
+ * (mute + fullscreen + "Mein Pinguin" + the mode switch, right-aligned to the safe area), and this
+ * plaque starts at x=16 — so 152 px is the whole budget. Measured against the face rather than
+ * guessed: "Noch 4 auf dem Eis" is 121 px at 14 px/700 in Baloo 2, which fits inside that with the
+ * tighter padding below and nothing to spare. The `max-width` is the guard for the lines that do
+ * NOT fit — the spectator's "Wirf Schneebälle von deiner Eisscholle!" is 213 px and wraps, which is
+ * the right answer for a two-line hint and the wrong answer for a plaque sliding under a button.
+ */
+.hud {
+	line-height: 1.2;
+	max-width: 15rem;
+}
+.hud b {
+	font-size: 1.25em;
+	font-weight: 800;
+	font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+	/* WINS ON PURPOSE against the `px-3 py-2` in the markup, which is legal because this file is
+	   unlayered and Tailwind's utilities are not (`src/cascade.test.ts`). It is also why this file
+	   may not move into `@layer components`: there, the utility would win and the readout would grow
+	   straight back into the button row. */
+	.hud {
+		padding: 0.35rem 0.55rem;
+		max-width: 9.5rem;
+	}
+
+	/**
+	 * And the row facing it gets tighter, for the same 152 px of budget.
+	 *
+	 * The row is SIX items now — fullscreen, mute, a profile glyph, "Mein Pinguin", the mode switch,
+	 * "Mit Freunden" — and at `px-4` that is 581 px of buttons wanting a 552 px strip on a 568 px
+	 * screen. It only looked fine in `shots/small-landscape-island.png` because the island hides the
+	 * mode switch, and even there the readout and the row are TOUCHING: 111 px against 105 px, six
+	 * pixels of overlap, which is what "Rathausplatz" sitting under a fullscreen button looks like.
+	 *
+	 * 0.55 rem instead of 1 rem takes 14 px off each of the three word buttons. The island's row
+	 * comes back to 418 px and clears the readout by 23 px; an arena mode's fits on one line at
+	 * 537 px instead of wrapping to two and reaching down into the result panel.
+	 *
+	 * This is a floor, not a fix. Six chrome buttons do not belong on the narrowest phone the game
+	 * supports at any padding, and the next one breaks it again — the `flex-wrap` on the row is what
+	 * keeps that from putting a button off the edge of the screen. The real answer is the row getting
+	 * SHORTER: the profile and "Mein Pinguin" belong behind Der Laden.
+	 *
+	 * A padding override on a class the markup also pads, which the comment on `.action` says to be
+	 * careful with — so it is named, scoped to this row, and here is why.
+	 */
+	/* Wins on purpose against `px-4`, same mechanism as `.hud` above. Three classes would not be
+	   enough on their own: layer order beats specificity, so this only works while this file stays
+	   unlayered. */
+	.top-row .action {
+		padding-inline: 0.55rem;
+	}
+}
+
+/**
+ * The rotate-your-phone card.
+ *
+ * Portrait is not a layout problem here, it is a framing one, and no amount of CSS fixes it: the
+ * camera fits the whole arena, so on a tall screen the narrow horizontal field of view pushes it
+ * far enough back that a penguin is about 4% of the screen — measured, at 390×844. Landscape puts
+ * the same penguin at roughly 13%. Saying so is honest; shipping the portrait framing is not.
+ * `backlog/stories/11-portrait.md` is the plan for doing it properly, per mode.
+ *
+ * Driven by a media query rather than by the Screen Orientation API because the API is unavailable
+ * on iOS Safari, which is a large share of the audience, and a lock that silently does nothing is
+ * worse than a card that always works. The game keeps running underneath, so rotating resumes it
+ * mid-motion rather than restarting.
+ */
+.rotate-hint {
+	display: none;
+}
+
+@media (orientation: portrait) {
+	/**
+	 * Shown for the modes that cannot be played this way, and not for the ones that can.
+	 *
+	 * The mode is the one that knows — `sim/modes/island.ts` has carried `portrait: true` since the
+	 * hub shipped and nothing read it, so the island declared itself playable upright and was then
+	 * covered by a card telling the child to turn the phone. `Game.svelte` is the reader now, with an
+	 * `{#if !spec.portrait}` around the element.
+	 *
+	 * An `{#if}` rather than a class this file could switch on, and that is the right way round: the
+	 * sibling rule below makes the controls inert, so it is the card's ABSENCE from the document that
+	 * gives the stick and the buttons back. A card hidden by CSS would leave every control under it
+	 * dead — which is why there is no `.rotate-hint[hidden]` state here to get wrong.
+	 */
+	.rotate-hint {
+		position: absolute;
+		inset: 0;
+		display: grid;
+		place-items: center;
+		padding: 1.5rem;
+		/* Lighter than it was (0.82), because a child has to be able to see there is a GAME behind
+		   this and not just a message. Not much lighter: the arena framing in portrait is the thing
+		   this card exists because of — a penguin at 4% of the frame — so showing it off is not the
+		   goal either. The glyph does the persuading. */
+		background: rgb(13 58 92 / 0.72);
+		backdrop-filter: blur(3px);
+		z-index: 20;
+	}
+	/* The controls sit under the card and must not be reachable through it. `z-20` plus `inset: 0`
+	   already blocks anything below it; this catches what is above — `.customise` is `z-30`. And it
+	   is why the card is removed rather than hidden: no element, no sibling rule, controls live. */
+	.rotate-hint ~ * {
+		pointer-events: none;
+	}
+
+	/**
+	 * And while the card is up, NOTHING ELSE IN THE INTERFACE IS. The game keeps running; the
+	 * interface over it does not.
+	 *
+	 * Three separate faults, one cause. Photographed at 390×844 (`shots/portrait390-card.png`):
+	 *
+	 *  1. **The composition.** The card centres its glyph and its three words; the start panel
+	 *     centres a title, a tagline and a green button. Both are `place-items: center` in the same
+	 *     box, so they do not merely happen to overlap — they are *built* to occupy the same place.
+	 *     The phone landed squarely on the panel's title and "Handy quer halten" lay across its
+	 *     green button. Two screens fighting, and no amount of moving either one fixes a collision
+	 *     that is structural.
+	 *  2. **Trap 4, again, and nobody had filed it.** The top-right row is `z-10`; the card is `z-20`
+	 *     with `inset: 0` and it takes pointer events. So every button in that row — mute included —
+	 *     has always been VISIBLE and completely dead behind this card. That is the project's
+	 *     signature bug in the one composition every iPhone player meets first.
+	 *  3. **The copy is wrong.** The hint pill was reading "Links ziehen · Hüpf, Ball, Schubs" over
+	 *     the top of a card that exists because none of those controls can be used.
+	 *
+	 * `:has()` rather than an `{#if}` per block, and that is the point: this rule cannot be forgotten
+	 * by the ninth overlay somebody adds. `> :not(canvas, .rotate-hint)` is the whole interface minus
+	 * the game and the card, expressed once. If `:has()` is unsupported the rule is dropped and the
+	 * behaviour is exactly what shipped before it, so there is no version of this that is worse.
+	 *
+	 * The WebGL failure panel is safe by construction, not by exclusion: `failure` and the card live
+	 * in opposite branches of the same `{#if}`, so when there is a failure to report there is no card
+	 * in the document and `:has()` matches nothing. `visibility` rather than `display` so nothing
+	 * reflows on rotation, and because it takes the hidden controls out of the tab order too.
+	 */
+	.stage:has(> .rotate-hint) > :not(canvas, .rotate-hint) {
+		visibility: hidden;
+	}
+
+	/**
+	 * THE JOYSTICK'S ZONE, narrowed and shortened in portrait.
+	 *
+	 * **It is here for the unreachable-up bug below, and NOT for the reason two earlier versions of
+	 * this comment gave.** Both said the dash button was being covered — first that all 80 px of it
+	 * sat inside the zone, then, corrected, that its left 32 px did. The overlap is real and both
+	 * conclusions were wrong, because the fact that turns an overlap into a dead control stopped
+	 * being true: `Game.svelte` now renders the action triangle AFTER `<Joystick>`, every element
+	 * involved has `z-index: auto`, and paint order among equals is document order — so the buttons
+	 * win the tap. Traps 4 and 12 are both quoted as "the zone is the left half AND IT COMES LATER IN
+	 * THE DOM", and the second half of that sentence is the load-bearing one. It no longer holds here.
+	 *
+	 * It took reverting this rule and watching an end-to-end test still pass to see it, which is the
+	 * only reason it is written down instead of being a trap in `CLAUDE.md` that never happened. The
+	 * narrowing STAYS — see below — but the dash is not what buys it.
+	 *
+	 * The triangle's safety therefore rests on one line being above another, silently, and this file
+	 * cannot see that. `src/stacking.test.ts` can, and asserts both halves: the row before the zone
+	 * (so its `z-10` is load-bearing, which is trap 12 and still live), the dash after it (so it
+	 * needs nothing). Move the triangle above `<Joystick>` and the 32 px go dead for real.
+	 *
+	 * The width is still derived from the box rather than left at 50%, because a zone that stops
+	 * where the controls start is the honest shape whether or not the cascade is currently forgiving,
+	 * and because "it happens to be harmless" is not a thing to build a thumb's play area on.
+	 *
+	 * DERIVED from the box rather than set to a number, because the box is what it has to clear: the
+	 * box is 11 rem wide, sits `max(1rem, safe-area-inset-right)` in from the edge, and the zone stops
+	 * 1 rem short of it. Written as a constant it would be right on this phone and wrong on the first
+	 * one with a real inset on that edge. On a 320 px screen the zone comes out 112 px wide; on a
+	 * 390 px phone, 182 px. Both are more thumb than a thumb needs, because a FLOATING stick only has
+	 * to be LANDED in, never reached across — and its 56 px base is allowed to overflow the zone,
+	 * since the pointer is captured on down and the graphics are not what receives the touch.
+	 *
+	 * A QUADRANT, height included, which it could not be until `Joystick.svelte` drew its stick in
+	 * viewport coordinates. Those two indicator divs place themselves from `event.clientX/clientY`;
+	 * under `absolute` they were positioned against THIS element, so the numbers only meant what they
+	 * said while its origin happened to be the viewport's — and giving it a `top` would have drawn
+	 * every stick that far down the screen from the finger holding it. They are `fixed` now, so the
+	 * coordinate space is the one the numbers were always written in and this zone can be moved and
+	 * resized freely.
+	 *
+	 * 55% of the height, bottom-anchored, and `top: auto` is the load-bearing half of that: the
+	 * utility on the element is `inset-y-0`, so `top` and `bottom` are both 0 — and an absolutely
+	 * positioned box with `top`, `bottom` AND `height` all set ignores `bottom`, which would give the
+	 * TOP 55% and cover the readout instead of the thumb's corner. The number itself is a judgement
+	 * bounded by two measurements. It has to start below the readout stack, which on a 320×640 screen
+	 * ends around y=236, and 55% starts at y=288.
+	 *
+	 * And it has to keep the TOP of the screen out of the control surface, which is not tidiness —
+	 * it is a bug nobody would ever file. `STICK_RADIUS` is 56 px and a finger cannot travel above
+	 * the glass, so a stick landed at y≈0–56 has no room to pull upward and **can never request "up"
+	 * at all**: a control that is present, looks live, answers three of its four directions and
+	 * silently refuses the fourth. That does not get reported as a broken control. It gets reported
+	 * as the game "feeling off near the top", which is the exact language trap 7 was reported in for
+	 * a whole phase — so it is written down here rather than left to be re-found by feel. Any future
+	 * change to this height has to keep at least `STICK_RADIUS` of glass above the zone's top edge;
+	 * 55% leaves 288 px of it.
+	 *
+	 * In landscape the zone stays full height, where it has shipped for four phases — the same
+	 * argument applies there and the top of a 320 px landscape screen is the readout's corner, which
+	 * no thumb reaches for. Worth revisiting if anybody ever plays this on a tall landscape tablet.
+	 *
+	 * Selected via `[role="application"]` because that is the joystick's root and the only one in the
+	 * app, and that file is not this pass's to edit. `.stick-zone` is the name it should carry; both
+	 * are listed so the day it lands, this keeps working and the attribute can go.
+	 */
+	/* Wins on purpose against the `w-1/2` on the joystick's root. This is the one override in the
+	   file whose failure would be invisible AND dangerous — a zone back at half the screen puts the
+	   dash button under it again — so it is worth knowing that `@layer components` would silently
+	   undo it. */
+	.stick-zone,
+	[role='application'] {
+		width: calc(100% - 12rem - max(1rem, env(safe-area-inset-right)));
+		top: auto;
+		height: 55%;
+	}
+
+	/**
+	 * The readout, which in portrait cannot share the top edge with the button row.
+	 *
+	 * That row carries five items now and on a 320 px screen they want 447 px, so it WRAPS — the
+	 * `flex-wrap justify-end` on it in `Game.svelte` is a trap-4 guard rather than a style, and it is
+	 * unconditional on purpose: traps 4 and 12 have both been fixed by arithmetic five times (count
+	 * the buttons, measure the labels, confirm the row still clears something), and that works
+	 * exactly until the next button. Wrapping makes overflow structurally impossible instead of
+	 * arithmetically unlikely. It is still not a substitute for the row getting SHORTER.
+	 *
+	 * Two lines is what it wraps to here, and right-aligned the first of them runs 302 px wide on a
+	 * 320 px screen — from x≈2. So the readout is not BESIDE the row, it is under it, and the row
+	 * wins the stacking order because of the `z-10` that keeps it pressable: visible, legible and
+	 * completely hidden.
+	 *
+	 * So the readout starts below the row instead — two 48 px lines plus the 8 px `gap-2` between
+	 * them, on top of the safe-area inset, which clears the row by 8 px. Landscape is untouched:
+	 * there the row is one line and the two have always sat side by side with room between them.
+	 */
+	.hud-stack {
+		padding-top: calc(max(0.75rem, env(safe-area-inset-top)) + 7rem);
+	}
+
+	/* And it gets its width back. The 9.5 rem cap under `max-width: 640px` exists to stop the
+	   readout reaching the button row, and below that row there is nothing to reach — so a portrait
+	   phone gets the wider plaque and the spectator's two-line hint stops wrapping to three. */
+	.hud {
+		max-width: 15rem;
+	}
+}
+
+/**
+ * The phone in the rotate card, which is the only part of it anybody reads.
+ *
+ * A drawn object rather than an outline: a screen, a rounded body and a shadow, so the thing that
+ * tips over reads as a phone tipping over rather than as a rectangle rotating. It is the first screen
+ * an iPhone child holding the phone upright ever sees, and there is nothing else this game can do
+ * for them — no browser on iOS implements the Screen Orientation API, so `fullscreen.ts` cannot turn
+ * the screen and this picture has to.
+ *
+ * So it is big and the words are few. Clash of Clans never has to say anything because a native app
+ * declares its orientation and the OS turns the phone; the nearest a web game gets is a picture
+ * obvious enough that the device is turned before the sentence is read.
+ */
+.rotate-glyph {
+	/* Uncontested `position` — the markup gives this element `mx-auto mb-6 h-24 w-14` and no
+	   positioning utility. It is here for the home bar below, explicitly rather than by relying on
+	   the animated `transform` to establish a containing block, which would be another thing that is
+	   correct only by coincidence. */
+	position: relative;
+	background: var(--sky);
+	border: 4px solid #fff;
+	/* THE CHIN, and it is the whole reason this reads as a phone. A rounded rectangle with an even
+	   border is a card, a battery or a door — Daniel's photograph caught it mid-turn and it could
+	   have been any of the three. Asymmetry along one axis is what makes a slab a device, and it
+	   costs one declaration. */
+	border-bottom-width: 11px;
+	border-radius: 0.9rem;
+	box-shadow:
+		0 6px 0 rgb(13 58 92 / 0.55),
+		0 14px 22px rgb(0 0 0 / 0.3),
+		/* The screen's own edge, so the pale area reads as glass set into the bezel rather than as
+		   the whole object being pale blue. */
+		inset 0 0 0 1px rgb(13 58 92 / 0.28);
+	animation: tip-over 2.8s ease-in-out infinite;
+}
+
+/* The home bar, sitting in the chin. Two cues rather than one, because the glyph has to work as a
+   STILL: `prefers-reduced-motion` stops the turning, and the turning was carrying all the meaning. */
+.rotate-glyph::before {
+	content: '';
+	position: absolute;
+	left: 50%;
+	bottom: -8px;
+	width: 45%;
+	height: 3px;
+	transform: translateX(-50%);
+	border-radius: 9999px;
+	background: rgb(13 58 92 / 0.45);
+}
+
+/**
+ * The result panel on a SHORT screen.
+ *
+ * It grew when losing stopped being one word in the same weight as winning — a glyph, a verdict and
+ * two lines of explanation — and on a 568×320 landscape (an iPhone SE on its side, the narrowest
+ * shape this game supports) the taller panel reached up into the top corner and covered the mute
+ * button. It is `pointer-events: auto`, so the button was visible, looked pressable, and was not:
+ * trap 4 in `CLAUDE.md` for the third time, and an end-to-end test caught it rather than a person.
+ *
+ * So on a short viewport the panel gives back everything that is not the verdict and the way out of
+ * it. The glyph shrinks, the explanations go — the verdict word is the sentence, and the two lines
+ * under it are the ones a bigger screen has room to add.
+ *
+ * Phase 5 gave back MORE than it took. The rim and the lip added 6 px of height to every plaque,
+ * which on a 320 px screen is 6 px of the ~8 px that stood between this panel and the mute button
+ * again — so `.cta` is shortened here too. The arithmetic, at 320 px tall: glyph 28 + verdict 36 +
+ * gaps 8 + button 52 + gap 10 + padding 29 + rim 6 = 169 px, centred, so the panel's top edge is at
+ * y≈76 and the mute button ends at y=60. Sixteen pixels, where the pre-phase-5 panel had eight.
+ */
+@media (max-height: 420px) {
+	.result-panel {
+		padding: 0.9rem 1.6rem;
+	}
+	.result-glyph {
+		font-size: 1.75rem;
+	}
+	.result-note {
+		display: none;
+	}
+	/**
+	 * `.overlay .panel .cta`, and the `.overlay` is load-bearing rather than extra specificity.
+	 *
+	 * Three classes so this beats the `mt-5 h-16` in the markup without an `!important` and without
+	 * changing what a tall screen gets. Still 52 px, over the 44 px minimum.
+	 *
+	 * It was `.panel .cta` for a day, which was right while the only green buttons in the game were
+	 * these three. "Mein Iglu" then grew a full-width `action cta` inside a `.panel` — and that
+	 * button has no top margin in its markup, so this rule was ADDING one it never asked for on
+	 * every short screen. `.overlay` is the existing line between the two kinds of plaque: the pass-
+	 * through layer over the game, whose panels compete with the button row in the corner, versus a
+	 * modal sheet that covers the screen and owns its own space. Only the first kind needs this.
+	 */
+	.overlay .panel .cta {
+		margin-top: 0.6rem;
+		height: 3.25rem;
+	}
+}
+
+/**
+ * Upright, turn, HOLD, turn back.
+ *
+ * The hold at the end is what makes it a demonstration rather than a wobble: it used to snap from
+ * landscape back to upright across the loop boundary, so the eye caught two rotations of equal
+ * weight and no destination. Landscape now gets the longest dwell of the four phases, which is the
+ * frame the child is being asked to copy.
+ */
+@keyframes tip-over {
+	0%,
+	22% {
+		transform: rotate(0deg);
+	}
+	45%,
+	80% {
+		transform: rotate(-90deg);
+	}
+	100% {
+		transform: rotate(0deg);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	/* The scene keeps moving — it is the game, and freezing it would be a blank screen. What stops
+	   is every decorative transition in the interface. The button press is NOT decorative and
+	   survives this: killing the duration makes it instant, which is better feedback than the
+	   90 ms ease it replaces, not less. */
+	*,
+	*::before,
+	*::after {
+		transition-duration: 0.01ms !important;
+		animation-duration: 0.01ms !important;
+	}
+
+	/**
+	 * The one animation that IS the message, and a regression of my own to undo.
+	 *
+	 * The rule above leaves the phone glyph frozen at whatever its last keyframe says, and when the
+	 * loop was made to close smoothly its last keyframe became `rotate(0deg)` — UPRIGHT. So a child
+	 * who has reduced motion turned on was being shown a picture of the orientation they were already
+	 * holding, as the entire instruction, on the one screen iOS has nothing else to offer. The old
+	 * abrupt loop ended at -90° and was accidentally right about this.
+	 *
+	 * So the static frame is stated rather than inherited: the phone is drawn lying down, which is
+	 * the position it is asking for. `animation: none` rather than an `!important` transform, because
+	 * an animation outranks a normal declaration and losing that race quietly is how this happened
+	 * the first time.
+	 */
+	.rotate-glyph {
+		animation: none;
+		transform: rotate(-90deg);
+	}
+}

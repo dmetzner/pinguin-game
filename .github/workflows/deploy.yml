@@ -1,0 +1,91 @@
+name: Deploy
+
+# Publishes to CLOUDFLARE PAGES (project `pingu`, https://pingu.metzner.uk), not to GitHub Pages.
+# GitHub Pages was the original target and is not usable here: this repository is private, and
+# Pages for a private repository needs a paid plan. Cloudflare serves it on the free tier, from a
+# domain root — which is why no `BASE_PATH` is set below and the build lands at `/`.
+#
+# GATED ON CI. This triggers on the CI workflow's completion and refuses anything but `success`,
+# so lint, typecheck, the unit suite, the production build and the end-to-end run are all gates on
+# what reaches the public URL — not just on the pull request.
+#
+# Two consequences worth knowing before editing either file:
+#
+#  * Adding a job to `ci.yml` strengthens this gate automatically: a `workflow_run` conclusion is the
+#    aggregate of every job in the run, so nothing needs wiring here.
+#  * Renaming the CI workflow, or its `name:`, BREAKS the gate — nothing matches `workflows: ['CI']`
+#    and no deploy ever fires again. That fails closed, which is the safe direction, but it is
+#    silent. Change both files together.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   a token with Pages:Edit. Account-scoped tokens work unchanged.
+#   CLOUDFLARE_ACCOUNT_ID   the Cloudflare account id — Dashboard → Workers & Pages → sidebar
+#
+# Optional repository variable:
+#   CLOUDFLARE_PAGES_PROJECT  the Pages project name, default `pingu`. It is the public
+#                             *.pages.dev hostname, so a rename is a Cloudflare project rename
+#                             rather than an edit here — which is why it is a variable.
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+    # Filters the HEAD BRANCH of the triggering run, so a CI run for a pull request cannot reach here.
+    branches: [main]
+  # So a deploy can be re-run without pushing a commit — useful the first time, when the Cloudflare
+  # project has just been created and the last CI run predates it.
+  workflow_dispatch:
+
+# `contents: read` is all this needs; nothing here writes to the repository. Spelled out because a
+# `workflow_run` job runs with the default token permissions of the DEFAULT BRANCH's configuration.
+permissions:
+  contents: read
+
+# Never two deploys at once, and never cancel one half-published. `cancel-in-progress: false` is
+# deliberate here and the opposite of the setting in `ci.yml`: cancelling a check is free, cancelling
+# a publish can leave the site serving a half-uploaded artifact.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # `workflow_run` fires on failure and cancellation too, so the conclusion has to be checked
+    # explicitly. Without this line a red CI run still publishes. `workflow_run.event == 'push'` in
+    # addition to the `branches:` filter narrows *why* CI ran, so a `workflow_dispatch` of CI does
+    # not turn into a production deploy by surprise.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      # PIN THE COMMIT CI ACTUALLY VERIFIED. A `workflow_run` job checks out the default branch's tip
+      # by default, not the commit that triggered the run it is gated on — so with a bare checkout a
+      # second push landing during CI would publish code no green run has ever seen, and the gate
+      # would be decorative. `github.sha` is the fallback for the `workflow_dispatch` path, where
+      # `github.event.workflow_run` does not exist.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # No `BASE_PATH`: the site is served from the root of pingu.metzner.uk. Setting it would
+      # prefix every path with `/pinguin-game` and 404 the whole application.
+      - name: Build
+        run: npm run build
+
+      - name: Publish to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: >-
+            pages deploy build
+            --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'pingu' }}
+            --branch=main

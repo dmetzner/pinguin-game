@@ -1,0 +1,73 @@
+name: CI
+
+# Every job below is a gate. There is no `continue-on-error` anywhere in this file, deliberately:
+# one would punch a hole straight through to whatever is downstream of a green tick.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A push that supersedes an in-flight run cancels it. Cheaper, and it stops a stale red X sitting on
+# a commit that has already been fixed.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, types, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # `npm ci` and never `npm install`: the lockfile is the pinned dependency set, and an install
+      # that silently resolves something else makes CI a test of a tree nobody has.
+      - run: npm ci
+
+      - name: Lint and format check
+        run: npm run lint
+
+      - name: Type check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  e2e:
+    name: End-to-end (real production build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci
+
+      # Chromium only. The game is one canvas and three DOM controls; a second engine would triple
+      # the runtime to re-test a WebGL path that SwiftShader already exercises identically.
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # `CI` is already set by Actions, which is what makes `reuseExistingServer` false and forces a
+      # fresh build. That matters: locally a stale preview can answer and a suite can pass against
+      # code that was never built.
+      - name: End-to-end
+        run: npx playwright test
+
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

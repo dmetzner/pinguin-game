@@ -1,0 +1,24 @@
+{
+	// The end-to-end suite, which `npm run check` did not look at.
+	//
+	// SvelteKit generates `.svelte-kit/tsconfig.json` with an `include` covering `src`, `test` and
+	// `tests` — and this project's Playwright suite lives in `e2e`, so nothing in the gate ever
+	// type-checked it. That was invisible until a spec imported a real module from `src` to assert
+	// against an exported constant rather than a copied number (the rule `CLAUDE.md` states, and how
+	// the 0.75 m apex that delivered 0.38 m was caught). A broken import there was findable only by
+	// running Playwright, which is minutes rather than seconds and a full production build.
+	//
+	// A SEPARATE config rather than an `include` on the root one, deliberately: `include` in an
+	// extending config REPLACES the inherited list, so adding `e2e` at the root would mean restating
+	// every entry SvelteKit generates — ambient types, `$types`, the vite config — as a hand-copied
+	// list that goes stale the next time the framework changes it. That is the "one fact written down
+	// twice" mistake this codebase keeps paying for. This file adds a second, narrow pass instead and
+	// inherits every compiler option from the root, so the suite is checked under exactly the same
+	// strictness as the app: `strict`, and `noUncheckedIndexedAccess`.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"types": ["node"]
+	},
+	"include": ["e2e/**/*.ts", "playwright.config.ts", "vitest.config.ts"]
+}

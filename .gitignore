@@ -1,0 +1,17 @@
+node_modules
+/build
+/.svelte-kit
+/dist
+.env
+.env.*
+!.env.example
+/test-results
+/playwright-report
+/blob-report
+/playwright/.cache
+.DS_Store
+
+# Screenshots from `npm run shots`. Build artefacts of a specific commit on a specific machine, and
+# a binary that changes on every art change — the point of them is to be LOOKED at now, not diffed
+# later, and a repo that carries them grows by a megabyte a pass.
+/shots
