@@ -1,6 +1,7 @@
 import { expect, type Page, test } from '@playwright/test';
 import { EIS_FOR_FINISHING, EIS_FOR_WINNING, SAVE_VERSION } from '../src/lib/eis';
 import { priceOf } from '../src/lib/igloo';
+import { CHASE } from '../src/lib/sim/modes/registry';
 
 /**
  * The loop: the island needs no answering, a place offers its game, and finishing comes back to it.
@@ -40,12 +41,11 @@ async function readout(page: Page): Promise<string> {
 }
 
 /**
- * One short push on the stick, from a resting thumb, and then a pause.
+ * One push on the stick, from a resting thumb, and then a pause to settle.
  *
- * Short on purpose. Ice keeps what you give it — `ICE_DRAG` is 0.72 per second, so a full second of
- * walking coasts about five metres afterwards, and a place on the island is twelve metres across. A
- * tenth of a second of push and a pause to let it settle is how a test arrives IN somewhere rather
- * than through it, which is the difference between this walking and this flailing.
+ * For LEAVING somewhere, which is all a pulse can be trusted to do — see `walkTo` for why arriving
+ * somewhere needs a held stick instead. Ice keeps what you give it (`ICE_DRAG` is 0.72 per second),
+ * so a push and a pause is how a test steps off a place rather than through it.
  *
  * `dx` is in stick units: +1 is a full push right, which is +x in the world and therefore east. That
  * is `stickVector` passing `dx` straight through and the rig standing on the +z side looking along
@@ -66,22 +66,145 @@ async function nudge(page: Page, dx: number): Promise<void> {
 }
 
 /**
- * Walk until the readout says this is where we are.
+ * Walk until the readout says this is where we are: stick HELD down, released on arrival.
  *
- * Polls the observable rather than counting seconds: a walk timed in milliseconds is a walk that
- * arrives on a fast machine and stops short on a slow one. The failure names what the readout
- * actually said, because "never got there" and "got somewhere else" are different bugs.
+ * **A pulsed walk cannot cross this island, and that is a fact about the terrain rather than about
+ * the machine it runs on.** This was 45 short pushes, on the reasoning that ice keeps what you give
+ * it and a place is only twelve metres across — true on the flat, and wrong the moment the walk
+ * crosses a hill. `ISLAND_MOUNDS[1]` sits at (17, −6) with a 7.5 m radius directly across the line
+ * east to the Eisarena, at a perfectly climbable 0.46 gradient, and `MOUND_MAX_SLOPE`'s own note
+ * says exactly what that means for a thumb that lets go: "walking up works and stopping half way
+ * slides you back down". So every pulse gained a little of the hill and every pause gave back more,
+ * and the walker finished each attempt back on the square it started from — a readout of
+ * "Geh zu einem Platz" that read like a lost penguin and was really a test standing still.
+ *
+ * Measured east across the island, 45 pushes each: 0.12 s of push never arrives, 0.4 s never
+ * arrives, 0.9 s arrives on push 36 — and 36 of 45 is not a margin, it is the next slow machine's
+ * failure. A player crossing an island holds the stick, so this holds it, which spends the budget
+ * on walking instead of on 45 pauses that each hand the hill back.
+ *
+ * **`dx`/`dy` are SCREEN directions, and which zone one of them reaches is a MEASUREMENT.** This
+ * used to carry a sentence saying "+1 is a full push right, which is +x in the world and therefore
+ * east", derived from `stickVector` and where the rig stands. That derivation is sound for the two
+ * arena modes and wrong here, because the hub's camera is a FOLLOW camera: `scene.setFollow` chases
+ * the player's own facing into `applied`, and `scene.steer` rotates the thumb by it, so the stick is
+ * camera-relative and the camera is player-relative. A held direction therefore converges on a world
+ * heading rather than naming one, and no amount of reading `camera.ts` will tell you which. It is
+ * trap 7's shape with the sign replaced by a feedback loop — so the honest thing is to drive it and
+ * look. Held from the square, twenty seconds each: up reaches Der Berg at 9.2 s, down reaches the
+ * Robbenhöhle at 6.4 s, left passes Der Laden at 2.4 s, and RIGHT reaches nothing at all. East is
+ * the one cardinal with a hill on the line (`ISLAND_MOUNDS[1]` at (17, −6), a climbable 0.46
+ * gradient), the walk deflects around it, and a chasing camera never turns it back — which is why
+ * the Eisarena is not the game this test walks to any more.
+ *
+ * Polls the observable rather than counting seconds, because a walk timed in milliseconds is a walk
+ * that arrives on a fast machine and stops short on a slow one — and a slow one is the normal case
+ * here: `render/loop.ts` caps catch-up at `MAX_CATCHUP_SECONDS`, so a browser drawing this island
+ * on a CPU rasteriser advances the simulation slower than the wall clock, and every fixed-duration
+ * walk silently covers less ground. The failure names what the readout actually said, because
+ * "never got there" and "got somewhere else" are different bugs.
  */
-async function walkTo(page: Page, place: string, dx: number, steps = 45): Promise<void> {
-	for (let i = 0; i < steps; i++) {
-		if ((await readout(page)).includes(place)) return;
-		await nudge(page, dx);
+async function walkTo(page: Page, place: string, dx: number, dy = 0, seconds = 45): Promise<void> {
+	const box = page.viewportSize();
+	if (!box) throw new Error('no viewport');
+	const x = box.width * 0.22;
+	const y = box.height * 0.62;
+	const deadline = Date.now() + seconds * 1000;
+
+	/**
+	 * There, and STILL there 400 ms later.
+	 *
+	 * A single check returns the moment the readout names the place, which is the moment the walker
+	 * ENTERS it — brake or no brake, it is still moving, and the door button it is about to be asked
+	 * to press is being mounted and unmounted underneath the click. Playwright reported that exactly:
+	 * "element is not stable", then "element was detached from the DOM". Standing in a place and
+	 * arriving in it are different states and this test needs the first one.
+	 */
+	const settled = async (): Promise<boolean> => {
+		if (!(await readout(page)).includes(place)) return false;
+		await page.waitForTimeout(400);
+		return (await readout(page)).includes(place);
+	};
+
+	while (Date.now() < deadline) {
+		if (await settled()) return;
+
+		await page.mouse.move(x, y);
+		await page.mouse.down();
+		await page.mouse.move(x + dx * 70, y + dy * 70, { steps: 3 });
+		try {
+			while (Date.now() < deadline && !(await readout(page)).includes(place)) {
+				await page.waitForTimeout(250);
+			}
+		} finally {
+			// **BRAKE rather than let go.** Ice keeps what you give it — about five metres of coast,
+			// against a zone ten metres across entered off-centre by a walk that converged on its own
+			// heading. Letting go read the door of a place the walker had already slid out of the far
+			// side of, intermittently, which is the worst way for a test to be wrong. A full deflection
+			// the other way is the same 9.5 m/s² of grip trap 1 is about, pointed at stopping, and it
+			// is what a thumb does at a door. The outer loop sets off again if it was not enough.
+			await page.mouse.move(x - dx * 70, y - dy * 70, { steps: 2 });
+			await page.waitForTimeout(250);
+			await page.mouse.up();
+			await page.waitForTimeout(250);
+		}
 	}
 	throw new Error(
-		`${steps} steps and never reached ${place}; the readout says ${JSON.stringify(
+		`${seconds}s of walking and never stopped in ${place}; the readout says ${JSON.stringify(
 			await readout(page)
 		)}`
 	);
+}
+
+/**
+ * Walk one way and photograph the screen the moment a place is reached, without stopping there.
+ *
+ * For a claim about what a place SAYS rather than about standing in it. `walkTo` has to park the
+ * walker, and parking is the hard half: a zone can be as small as Der Laden's four metres and a
+ * released walk coasts about five, so a test that arrives, brakes and then reads the DOM is reading
+ * it a second later and somewhere else. Everything here is read in ONE `evaluate`, so the readout
+ * and the sign beside it cannot come from two different frames — which is the whole reason this is
+ * a snapshot rather than three locator assertions.
+ */
+async function signAt(
+	page: Page,
+	place: string,
+	dx: number,
+	dy = 0,
+	seconds = 30
+): Promise<{ door: string | null; hasEnter: boolean }> {
+	const box = page.viewportSize();
+	if (!box) throw new Error('no viewport');
+	const x = box.width * 0.22;
+	const y = box.height * 0.62;
+
+	await page.mouse.move(x, y);
+	await page.mouse.down();
+	await page.mouse.move(x + dx * 70, y + dy * 70, { steps: 3 });
+	try {
+		const deadline = Date.now() + seconds * 1000;
+		while (Date.now() < deadline) {
+			const shot = await page.evaluate(() => {
+				const text = (id: string) =>
+					(document.querySelector(`[data-testid="${id}"]`) as HTMLElement | null)?.innerText ??
+					null;
+				return {
+					readout: text('hud') ?? '',
+					door: text('door'),
+					hasEnter: !!document.querySelector('[data-testid="door-enter"]')
+				};
+			});
+			if (shot.readout.includes(place)) return { door: shot.door, hasEnter: shot.hasEnter };
+			await page.waitForTimeout(200);
+		}
+		throw new Error(
+			`${seconds}s of walking and never passed through ${place}; the readout says ${JSON.stringify(
+				await readout(page)
+			)}`
+		);
+	} finally {
+		await page.mouse.up();
+	}
 }
 
 /** Flail about until the round resolves. Not skilful: the claim is that a round ENDS. */
@@ -184,8 +307,10 @@ test.describe('the island', () => {
 		page
 	}, testInfo) => {
 		test.skip(testInfo.project.name === 'portrait', 'controls are inert behind the rotate card');
-		// The whole loop end to end: a walk of nine seconds, a round of up to ninety, and the way back.
-		test.setTimeout(300_000);
+		// The whole loop end to end: a walk, a round of up to ninety seconds, and the way back. The
+		// WALK is the variable part — it is a control loop against a follow camera (see `walkTo`), so it
+		// costs anything from seven seconds to most of a minute depending on how the heading converges.
+		test.setTimeout(420_000);
 
 		const problems: string[] = [];
 		page.on('pageerror', (e) => problems.push(`pageerror: ${e.message}`));
@@ -198,17 +323,29 @@ test.describe('the island', () => {
 		await expect(page.getByTestId('eis')).toBeVisible();
 		expect(await eis(page)).toBe(0);
 
-		// East, to the jetty. Deliberately not the square we spawned on: coming back to the place you
-		// spawned in would prove nothing about coming back to the place you LEFT.
-		await walkTo(page, 'Eisarena', 1);
-		await expect(page.getByTestId('door-enter')).toContainText('Klassisch');
-		// The classic round has no rules line to give (`copy.rules` is null), so the card names its field
-		// instead — "4 Pinguine" is the difference a child actually notices.
-		await expect(page.getByTestId('door')).toContainText('4 Pinguine');
+		// South, to the cave. Deliberately not the square we spawned on: coming back to the place you
+		// spawned in would prove nothing about coming back to the place you LEFT. It was the jetty
+		// due east until the walk was actually measured — see `walkTo`, which now records what each
+		// screen direction reaches and why east is the one that reaches nothing.
+		const CAVE = 'Robbenhöhle';
+		await walkTo(page, CAVE, 0, 1);
+		// From the REGISTRY rather than typed here, so the door and the mode cannot drift apart —
+		// the same rule the rest of this suite already follows for a mode's name and its dash label.
+		await expect(page.getByTestId('door-enter')).toContainText(CHASE.name);
+		// The card carries the RULES where a mode has them, and its field where it does not — the
+		// classic round's `copy.rules` is null, which is why this line used to read "4 Pinguine".
+		await expect(page.getByTestId('door')).toContainText(CHASE.copy.rules ?? CHASE.copy.who);
 
 		// One deliberate press, and it is a different game on the other side.
 		await page.getByTestId('door-enter').click();
-		await expect(page.getByTestId('hud')).toContainText('Noch 4 auf dem Eis', { timeout: 30_000 });
+		// Through the door and into something else, which is the whole claim here. Asserted as "the
+		// hub's readout is gone, and a RACE standing is in its place": this line used to read
+		// "Noch 4 auf dem Eis", a body count belonging to the classic round, and a chase does not
+		// have one — it says "Platz 1 von 6 · Ufer 229 m". The field size is deliberately not
+		// asserted either, because the sea lion eats it down to "von 4" while the round runs, so a
+		// number here would be a race between this expectation and the animal.
+		await expect(page.getByTestId('hud')).not.toContainText('Insel', { timeout: 30_000 });
+		await expect(page.getByTestId('hud')).toContainText('Platz', { timeout: 30_000 });
 		// No second question: the button at the door was the decision, so there is no "Los geht's!"
 		// behind it — but there IS a countdown, because a round is a round.
 		await expect(page.getByTestId('play')).toHaveCount(0);
@@ -232,10 +369,10 @@ test.describe('the island', () => {
 		await expect(page.getByTestId('again')).toBeVisible();
 		await page.getByTestId('to-island').click();
 
-		// Home, and standing at the jetty we left from rather than back on the square. That is the loop
+		// Home, and standing at the cave we left from rather than back on the square. That is the loop
 		// closed: the island is a place that was still there, not a level that reloaded.
 		await expect(page.getByTestId('hud')).toContainText('Insel', { timeout: 30_000 });
-		await expect(page.getByTestId('hud')).toContainText('Eisarena');
+		await expect(page.getByTestId('hud')).toContainText(CAVE);
 		await expect(page.getByTestId('door-enter')).toBeVisible();
 
 		// And the number on the island went up by exactly what the round said it paid. This is the whole
@@ -372,9 +509,14 @@ test.describe('the island', () => {
 
 		// West, and it is the shortest walk on the island on purpose: a child who wants a different hat
 		// should not have to cross the island for it.
-		await walkTo(page, 'Der Laden', -1, 20);
-		await expect(page.getByTestId('door')).toContainText('Öffnet bald');
-		await expect(page.getByTestId('door-enter')).toHaveCount(0);
+		// Read as it is REACHED rather than after stopping in it. Der Laden is the smallest zone on
+		// the island at four metres of radius, and a walk that brakes at its edge coasts most of the
+		// way back out — so the sign was being read from a frame in which the walker had already
+		// left, and the test failed on a claim that was true. `signAt` takes the readout and the sign
+		// in one evaluate, which is the only way they are guaranteed to describe the same moment.
+		const sign = await signAt(page, 'Der Laden', -1);
+		expect(sign.door).toContain('Öffnet bald');
+		expect(sign.hasEnter).toBe(false);
 	});
 
 	test('has no Zack button — walking up to somebody is the interaction now', async ({

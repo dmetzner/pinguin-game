@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { ALL_MODES, CHASE, ISLAND, SLIDE } from '../src/lib/sim/modes/registry';
+import { ALL_MODES, CHASE, SLIDE } from '../src/lib/sim/modes/registry';
 import { storageKeys } from '../src/lib/storageKeys';
 
 /**
@@ -499,21 +499,45 @@ test.describe('a mode that declares itself landscape-only', () => {
 		//
 		// Coordinates are literal rather than fractions on purpose: the point of interest IS a 32 px
 		// band, and a fraction of the viewport would drift out of it on the next device size added.
-		await page.goto('/?mode=island');
+		//
+		// **On the MOUNTAIN, and it used to be the island.** The hub lost its dash when walking up to
+		// somebody became the interaction (`npc/talk.ts`, and `Game.svelte` says so beside the button:
+		// `spec.dashing` is false on the island now). So this guard was asserting a control that had
+		// been deliberately deleted — the geometry it exists to protect was fine and the test was
+		// pointing at nothing, which is a stale guard rather than a regression. The claim only needs a
+		// mode that is BOTH portrait-playable and dashing, and the slide is the one the two tests
+		// above already drive; the button's box is the same 176 px corner in every mode, so the band
+		// under test is unchanged.
+		await page.goto(`/?mode=${SLIDE.id}`);
+		// `intoPlay`, not `play`, and it is the countdown that forces it: the hub was `running` the
+		// moment it loaded, but a round holds its input until the counting stops. `play` alone puts
+		// the dash button on screen with a full cooldown ring and a simulation that will not take the
+		// press — which reads as "the tap was swallowed", the exact bug this test is here to catch.
+		await intoPlay(page);
 		await expect(page.getByTestId('hud')).toBeVisible({ timeout: 20_000 });
 
 		// The label comes from the REGISTER, not from a string typed here. Each mode names its own dash
-		// (`Schubsen` in an arena, `Schneller laufen` on the hub, `Anschieben` on the mountain), and a
-		// literal in this file would be a copy of a fact that lives in `sim/modes/` — the mistake
-		// `tapMode` above was already fixed for. Guessing it wrong is how this test first failed.
-		const dash = page.getByLabel(ISLAND.copy.dash.aria, { exact: true }).first();
+		// (`Schubsen` in an arena, `Anschieben` on the mountain), and a literal in this file would be a
+		// copy of a fact that lives in `sim/modes/` — the mistake `tapMode` above was already fixed
+		// for. Guessing it wrong is how this test first failed.
+		const dash = page.getByLabel(SLIDE.copy.dash.aria, { exact: true }).first();
 		const opacityOf = () =>
 			dash.evaluate((el) => Number.parseFloat((el as HTMLElement).style.opacity));
 		const before = await opacityOf();
 
-		await page.mouse.move(136, 568);
-		await page.mouse.down();
-		await page.mouse.up();
+		// Tapped up to five times, spaced, and that is about the MOUNTAIN rather than about the
+		// button: one segment in nine carries a bump, a racer crossing one is briefly airborne, and a
+		// dash asks for ground. A single tap therefore lands on nothing perhaps one run in three,
+		// which reads as the tap being swallowed — the exact failure this test exists to detect, from
+		// the exact opposite cause. Needing a second press on a bumpy descent is the mode working.
+		let after = before;
+		for (let i = 0; i < 5 && after >= before; i++) {
+			await page.mouse.move(136, 568);
+			await page.mouse.down();
+			await page.mouse.up();
+			await page.waitForTimeout(400);
+			after = await opacityOf();
+		}
 
 		// Both halves are needed. The first says the joystick did NOT take the tap — remove the
 		// quadrant rule and this is what fails. The second says the dash actually fired, rather than
@@ -521,7 +545,7 @@ test.describe('a mode that declares itself landscape-only', () => {
 		// reason. `dashReady` drives the button's own inline opacity, so it is the observable the
 		// keyboard test already relies on.
 		await expect(page.getByTestId('stick-base')).toHaveCount(0);
-		await expect.poll(opacityOf, { timeout: 5_000 }).toBeLessThan(before);
+		expect(after).toBeLessThan(before);
 	});
 });
 
@@ -1199,6 +1223,13 @@ test.describe('installable and offline', () => {
 
 		// Generated from `brand.ts` rather than hand-written into `static/` — invariant 5. If this
 		// ever disagrees with the document title, the manifest has been forked from the brand module.
+		//
+		// Waited for first, and that is a flake fix rather than a nicety: `goto` resolves on load and
+		// the title arrives with the app, so the comparison could read `''` against `PinguIsland` and
+		// report a forked manifest while both halves were perfectly correct. It failed about one run
+		// in three, always on a different project, which is exactly the shape that gets rerun until
+		// it is green instead of being read.
+		await expect(page).toHaveTitle(/\S/);
 		expect(manifest.name).toBe((await page.title()).split('—')[0]?.trim());
 		expect(manifest.display).toBe('fullscreen');
 		expect(manifest.orientation).toBe('landscape');

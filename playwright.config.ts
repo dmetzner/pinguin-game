@@ -28,6 +28,21 @@ export default defineConfig({
 	retries: process.env.CI ? 1 : 0,
 	reporter: process.env.CI ? 'github' : 'list',
 
+	// THREE MINUTES under CI, against Playwright's default of thirty seconds, and the reason is the
+	// rasteriser rather than the tests.
+	//
+	// Every test here boots a WebGL scene. On a laptop with a GPU that costs a second or two; on a
+	// CI runner there is no GPU at all, so `--use-gl=swiftshader` below draws the whole thing on the
+	// CPU — and `fullyParallel` then has several workers doing it at once on two shared cores.
+	// Measured on the two that fell over: "remembers a colour, a hat and a name across a reload"
+	// takes 14.4 s locally and "shows the penguin while it is being made" 12.4 s, and both blew the
+	// 30 s budget on CI while the assertions themselves were fine. A test that fails for want of a
+	// graphics card is a red badge that teaches nobody anything.
+	//
+	// It is a CEILING, not a wait: nothing here sleeps for it, so a genuinely stuck test still ends
+	// the run, just later. Locally the default stays, because locally 30 s IS the signal.
+	timeout: process.env.CI ? 180_000 : 30_000,
+
 	// PORT 4319, not Vite's default 4173, and that is not a preference.
 	//
 	// 4173 is what every Vite project on a machine picks, so a sibling repo's preview left running in
