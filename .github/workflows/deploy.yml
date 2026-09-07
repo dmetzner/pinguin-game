@@ -39,6 +39,7 @@ on:
 # `workflow_run` job runs with the default token permissions of the DEFAULT BRANCH's configuration.
 permissions:
   contents: read
+  deployments: write   # the "Record the deploy" step at the bottom
 
 # Never two deploys at once, and never cancel one half-published. `cancel-in-progress: false` is
 # deliberate here and the opposite of the setting in `ci.yml`: cancelling a check is free, cancelling
@@ -89,3 +90,30 @@ jobs:
             pages deploy build
             --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || 'pingu' }}
             --branch=main
+
+      # Mission control answers "is the live site current?" by counting commits since the newest
+      # GitHub deployment record in this project's environment (`deploy.environment` in
+      # ~/me/setup/mission-control/projects.json). A `pages deploy` posts no such record, so
+      # without this step the card measures whatever unrelated thing last posted one — which is
+      # how murln's web build came to be judged by its Play releases and callit read
+      # "79 undeployed" while live. `~/me/setup/record-deploy.sh` is the same call from a laptop.
+      #
+      # `auto_merge:false` + empty `required_contexts` are load-bearing: with the defaults GitHub
+      # refuses to create a deployment while checks are pending or red. This records what already
+      # shipped — it is not a gate. Best-effort: a dashboard is not worth failing a good deploy.
+      - name: Record the deploy
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          id=$(jq -n --arg ref "$GITHUB_SHA" --arg env "cloudflare-pages" \
+                 '{ref:$ref, environment:$env, task:"deploy", auto_merge:false,
+                   required_contexts:[], production_environment:true,
+                   description:"recorded by the deploy workflow"}' \
+               | gh api "repos/$GITHUB_REPOSITORY/deployments" --input - --jq .id) || true
+          case "${id:-}" in ''|null) echo "::warning::deploy not recorded"; exit 0 ;; esac
+          gh api "repos/$GITHUB_REPOSITORY/deployments/$id/statuses" \
+            -f state=success \
+            -f environment_url=https://pingu.metzner.uk >/dev/null \
+            || echo "::warning::deployment $id created without a success status"
