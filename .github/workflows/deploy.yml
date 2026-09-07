@@ -105,9 +105,14 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ github.token }}
+          # NOT github.sha. This job runs on `workflow_run`, where GITHUB_SHA is the default
+          # branch's tip — while the checkout above deliberately pins the commit CI verified.
+          # Recording the tip would claim a commit is live that was never published: push A
+          # starts CI, push B lands mid-run, the job publishes A and would have recorded B.
+          DEPLOYED_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -uo pipefail
-          id=$(jq -n --arg ref "$GITHUB_SHA" --arg env "cloudflare-pages" \
+          id=$(jq -n --arg ref "$DEPLOYED_SHA" --arg env "cloudflare-pages" \
                  '{ref:$ref, environment:$env, task:"deploy", auto_merge:false,
                    required_contexts:[], production_environment:true,
                    description:"recorded by the deploy workflow"}' \
